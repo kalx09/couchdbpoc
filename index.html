@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>POC-CouchDb</title>
+    <style>
+        pre {
+            white-space: pre-wrap;       /* css-3 */
+            white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
+            white-space: -pre-wrap;      /* Opera 4-6 */
+            white-space: -o-pre-wrap;    /* Opera 7 */
+            word-wrap: break-word;       /* Internet Explorer 5.5+ */
+        }
+    </style>
+    <script type="text/javascript">
+        var featured_data = '';
+        var updated_content_data = '';
+        var append_content_data = '';
+        var id_rev = {}
+        getLocalContent("content.json");
+        getLocalContent("updated_content.json");
+        
+        function getLocalContent(filename) {
+          var xhttp = new XMLHttpRequest();
+          //xhttp.setRequestHeader('Content-Type', 'text/plain');
+          xhttp.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+                if (filename=="content.json") {
+                    featured_data = JSON.parse(this.responseText);
+                } else {
+                    updated_content_data = JSON.parse(this.responseText);
+                }
+            }
+          };
+          xhttp.open("GET", filename, true);
+          xhttp.send();
+        }
+
+        function callAPI(apiName, method, headers, inputBody, description, callback) {
+            
+            var divs = document.getElementsByTagName('div');
+            for (i = 0; i < divs.length; i++) {
+                divs[i].style.backgroundColor = 'transparent';
+            }
+
+            // Output format
+            timestamp = new Date();
+            var desc = description!=undefined?"("+description+")":""
+            var outputText = "<div style='background-color:lightgray'><b>- Calling '" + apiName + "' with a '" + method + "' request "+ desc +":</b><br />";
+            outputText += "<ul><b><li id='response"+apiName + method + timestamp+"'></li></b></ul>";
+            // outputText += "<ul><li>Headers: <ul>";
+            // for (key in headers) {
+            //     outputText += "<li><pre>" + key + ": " + headers[key] + "</pre></li>"
+            // }
+            // outputText += "</ul></li>";
+            
+            outputText += "<ul><li>Response body: <ul><li><div id='" + apiName + method + timestamp + "'>\
+                                                      </div>\
+                                                    </li>\
+                                               </ul>\
+                                               <ul><li>\
+                                                    <div id='status" + apiName + method + timestamp + "'>\
+                                                      </div>\
+                                                    </li>\
+                                               </ul>\
+                            </li></ul>";
+
+            /*outputText += "<li>Request body: <ul><li><pre>" + JSON.stringify(inputBody) + "</pre></li></ul></li>";*/
+            
+            outputText += "</ul></li></ul></div>";
+            document.getElementById('output').innerHTML = outputText + document.getElementById('output').innerHTML;
+
+            var req = new XMLHttpRequest();
+            var request_time = new Date().getTime();
+            // Callback:
+            req.onreadystatechange = function () {
+                if (req.readyState != 4) return; // Not there yet
+
+                // Request successful, read the response
+                var resp = req.responseText;
+
+                var response_time = new Date().getTime() - request_time;
+
+                var jsonResp = JSON.parse(resp);
+
+                if (callback!=undefined){
+                    callback(jsonResp)
+                }
+
+                if (apiName.indexOf("include_docs")==-1){
+                    document.getElementById(apiName + method + timestamp).innerHTML = "<pre>" + JSON.stringify(jsonResp, undefined, 2) + "</pre>";
+                }
+                document.getElementById("status"+ apiName + method + timestamp).innerHTML = "<pre> Status: " + req.status +"</pre>";
+                document.getElementById("response"+ apiName + method + timestamp).innerHTML = "Response Time: <pre>" + response_time +" ms</pre>";
+                //start_time = undefined;
+            };
+
+            var url = "http://localhost/couchdb/" + apiName;
+            req.open(method, url, false);
+
+            //Send the proper header information along with the request
+            req.setRequestHeader("Content-type", "application/json");
+
+            for (key in headers) {
+                req.setRequestHeader(key, headers[key])
+            }
+
+            req.send(JSON.stringify(inputBody));
+        }
+
+        function welcome() {
+            clear();
+            callAPI('', 'GET', "", "", undefined);
+        }
+
+        const dbnames = ["test_db1"];
+
+        function create_db(){
+            clear();
+            dbnames.forEach(function(dbname){
+                callAPI(dbname, 'PUT', null, null, undefined);
+            });
+        }
+
+        function delete_db(){
+            clear();
+            id_rev={};
+            dbnames.forEach(function(dbname){
+                callAPI(dbname, 'DELETE', null, null, undefined);
+            });
+        }
+
+        function get_db_info(){
+            clear();
+            dbnames.forEach(function(dbname){
+                callAPI(dbname, 'GET', null, null, undefined);
+            });
+        }
+
+        function add_docs(no_of_records){
+            clear();
+            headers = {'Content-Type': 'application/json'};
+            dbnames.forEach(function(dbname){
+                for (var i=1; i<=no_of_records; i++)
+                    callAPI(dbname+"/newdoc"+Math.floor((Math.random() * 1000) + 1), 'PUT', headers, featured_data, "Record no: "+i, undefined);
+            });
+        }
+
+        var get_all_docs_callback = function(response){
+            if (response!=undefined){
+                var rows = response["rows"];
+                document.getElementById('key_rev').innerHTML = "";
+
+                if (response["total_rows"]>0) {
+                    document.getElementById('key_rev').innerHTML += '<button type="button" onclick=update_multiple_docs()> Append 90 items to all docs with a delay of 1 sec</button> <br/><br/>'
+                }
+
+                for (i=0; i<response["total_rows"]; i++){
+                    id_rev[rows[i]["id"]] = rows[i]["value"]["rev"];
+                    id_rev["doc_"+rows[i]["id"]] = rows[i]["doc"];
+                    
+                    var key = rows[i]["id"]; 
+                    var value = rows[i]["value"]["rev"];
+                    var doc = id_rev["doc_"+key];
+                    document.getElementById('key_rev').innerHTML += 
+                    '<li>'+rows[i]["id"] +': \
+                    <button type="button" onclick=append_to_doc("'+key+'","'+value+'")> Append 90 items </button>\
+                    <button type="button" onclick=update_doc("'+key+'","'+value+'")> Update doc to hold 90 items </button>\
+                    <button type="button" onclick=delete_doc("'+key+'","'+value+'")> Delete </button></li>'
+                    ;
+                }
+            }
+        }
+
+        function append_to_doc(key, rev){
+            console.log("append_to_doc | key: "+key);
+            headers = {'Content-Type': 'application/json'};
+            params = "rev="+rev;
+            var append_data = id_rev["doc_"+key];
+            for (var item_id in updated_content_data["items"]){
+                append_data["items"].push(updated_content_data["items"][item_id]);
+            }
+            dbnames.forEach(function(dbname){
+                callAPI(dbname+"/"+key+"?"+params, 'PUT', headers, append_data, undefined);
+            });
+            //get_all_docs();
+        }
+
+        var test = function(key, rev){
+            setTimeout(function(){append_to_doc(key, rev);},1000)
+        }
+
+        function update_multiple_docs(){
+            for (var i=0; i<Object.keys(id_rev).length; i++){
+                var key=Object.keys(id_rev)[i];
+                var rev = id_rev[key];
+                test(key,rev);
+            }
+        }
+
+        function update_doc(key,rev){
+            headers = {'Content-Type': 'application/json'};
+            params = "rev="+rev;
+            dbnames.forEach(function(dbname){
+                callAPI(dbname+"/"+key+"?"+params, 'PUT', headers, updated_content_data, undefined);
+            });
+            get_all_docs();
+        }
+
+        function delete_doc(key,rev){
+            headers = {'Content-Type': 'application/json'};
+            params = "rev="+rev;
+            dbnames.forEach(function(dbname){
+                callAPI(dbname+"/"+key+"?"+params, 'DELETE', null, null, undefined);
+            });
+            get_all_docs();
+        }
+
+        function get_all_docs(){
+            //clear();
+            params = "include_docs=true";
+            dbnames.forEach(function(dbname){
+                callAPI(dbname+"/_all_docs?"+params, 'GET', null, null, undefined, get_all_docs_callback);
+            });
+        }
+
+        function clear(){
+            document.getElementById('key_rev').innerHTML = "";
+            document.getElementById('output').innerHTML = '';
+        }
+
+    </script>
+</head>
+<body>
+<button type="button" onclick="welcome()">Welcome</button>
+<button type="button" onclick="create_db()">Create Db</button>
+<button type="button" onclick="delete_db()">Delete Db</button>
+<button type="button" onclick="get_db_info()">Get Db Info</button>
+<button type="button" onclick="add_docs(5)">Add 5 docs</button>
+<button type="button" onclick="add_docs(50)">Add 50 docs</button>
+<button type="button" onclick="add_docs(1)">Add Single Doc</button>
+<button type="button" onclick="get_all_docs()">Get All Docs</button>
+<button type="button" onclick="document.getElementById('output').innerHTML = '';">Clear Text</button>
+<br/><br/>
+
+<div id="key_rev"></div>
+<br/>
+
+<div id="output"></div>
+</body>
+</html>
